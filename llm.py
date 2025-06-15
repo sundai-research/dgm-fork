@@ -81,6 +81,13 @@ def create_client(model: str):
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
         ), model
+    elif model.startswith("Qwen/"):
+        print(f"Using Together OpenAI-compatible API with model {model}.")
+        client = openai.OpenAI(
+            api_key=os.getenv("TOGETHER_API_KEY"),
+            base_url="https://api.together.xyz/v1"
+        )
+        return client, model
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -228,7 +235,7 @@ def get_response_from_llm(
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    elif model.startswith("o1-") or model.startswith("o3-"):
+    elif model.startswith("o1-") or model.startswith("o3-") or model.startswith("Qwen/"):
         new_msg_history = msg_history + [{"role": "user", "content": system_message + msg}]
         response = client.chat.completions.create(
             model=model,

@@ -11,7 +11,7 @@ from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
 CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-OPENAI_MODEL = 'o3-mini-2025-01-31'
+OPENAI_MODEL = 'Qwen/Qwen3-235B-A22B-fp8-tput'
 
 def process_tool_call(tools_dict, tool_name, tool_input):
     try:
@@ -41,7 +41,7 @@ def get_response_withtools(
                 tool_choice=tool_choice,
                 tools=tools,
             )
-        elif model.startswith('o3-'):
+        elif model.startswith('o3-') or model.startswith('Qwen/'):
             response = client.responses.create(
                 model=model,
                 input=messages,
@@ -78,7 +78,7 @@ def check_for_tool_use(response, model=''):
                 'tool_input': tool_use_block.input,
             }
 
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('Qwen/'):
         # OpenAI, check for tool_calls in response
         for tool_call in response.output:
             if tool_call.type == "function_call":
@@ -118,7 +118,7 @@ def convert_tool_info(tool_info, model=None):
             'description': tool_info['description'],
             'input_schema': tool_info['input_schema'],
         }
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('Qwen/'):
         def add_additional_properties(d):
             if isinstance(d, dict):
                 if 'properties' in d:
@@ -128,13 +128,15 @@ def convert_tool_info(tool_info, model=None):
         add_additional_properties(tool_info['input_schema'])
         for p in tool_info['input_schema']['properties'].keys():
             if not p in tool_info['input_schema']['required']:
+                # Add this property to required list
                 tool_info['input_schema']['required'].append(p)
+                # Preserve original type and allow null
                 t = copy.deepcopy(tool_info['input_schema']['properties'][p]["type"])
                 if isinstance(t, str):
                     tool_info['input_schema']['properties'][p]["type"] = [t, "null"]
                 elif isinstance(t, list):
                     tool_info['input_schema']['properties'][p]["type"] = t + ["null"]
-                
+
         return {
             'type': 'function',
             'name': tool_info['name'],
@@ -274,7 +276,7 @@ def convert_msg_history(msg_history, model=None):
     """
     if 'claude' in model:
         return convert_msg_history_claude(msg_history)
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('Qwen/'):
         return convert_msg_history_openai(msg_history)
     else:
         return msg_history
@@ -530,7 +532,7 @@ def chat_with_agent(
             new_msg_history = conv_msg_history
         new_msg_history = msg_history + new_msg_history
 
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('Qwen/'):
         # OpenAI models
         new_msg_history = chat_with_agent_openai(msg, model=model, msg_history=msg_history, logging=logging)
         # Current version does not support cross-model conversion
