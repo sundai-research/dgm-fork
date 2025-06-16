@@ -82,7 +82,7 @@ class AgenticSystem:
         self.test_description = test_description
         self.self_improve = self_improve
         self.instance_id = instance_id if not self_improve else 'dgm'
-        self.code_model = CLAUDE_MODEL
+        self.code_model = OPENAI_MODEL
 
         # Initialize logger and store it in thread-local storage
         self.logger = setup_logger(chat_history_file)
@@ -190,6 +190,8 @@ def main():
         self_improve=args.self_improve,
         instance_id=args.instance_id,
     )
+
+    print("\033[1;91m*** DEBUG: Agentic system has been initiated ***\033[0m")
 
     # Run the agentic system to try to solve the problem
     agentic_system.forward()

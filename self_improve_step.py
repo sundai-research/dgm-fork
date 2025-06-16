@@ -25,7 +25,8 @@ from utils.docker_utils import (
 )
 
 dataset = None
-diagnose_model = 'Qwen/Qwen3-235B-A22B-fp8-tput'
+# diagnose_model = 'Qwen/Qwen3-235B-A22B-fp8-tput'
+diagnose_model = 'qwen/qwen3-32b'
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
     client = create_client(diagnose_model)
@@ -40,6 +41,8 @@ def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attem
             patch_files=patch_files,
         )
     try:
+        safe_log("#" * 100)
+        safe_log(f"diagnose_problem 43: diagnose_prompt {diagnose_prompt}")
         response, msg_history = get_response_from_llm(
             msg=diagnose_prompt,
             client=client[0],
@@ -319,6 +322,7 @@ def self_improve(
         safe_log(f"problem_statement: {problem_statement}")
     else:
         safe_log("No entry provided. Exiting.")
+        metadata['last_error'] = "No entry provided."
         cleanup_container(container)
         save_metadata(metadata, output_dir)
         return metadata
@@ -328,6 +332,7 @@ def self_improve(
     # If problem statement is not found, exit
     if not problem_statement:
         safe_log("Failed to diagnose the problem statement. Exiting.")
+        metadata['last_error'] = "Failed to diagnose the problem statement."
         cleanup_container(container)
         save_metadata(metadata, output_dir)
         return metadata
@@ -343,6 +348,8 @@ def self_improve(
         "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
         "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
         "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+        "TOGETHER_API_KEY": os.getenv('TOGETHER_API_KEY'),
+        "GROQ_API_KEY": os.getenv('GROQ_API_KEY'),
     }
     cmd = [
         "timeout", "1800",  # 30min timeout
@@ -391,10 +398,10 @@ def self_improve(
     model_name_or_path = run_id
     if model_patch_exists and model_patch_notempty:
         try:
-            if not polyglot:
-                run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
-            else:
-                run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
+            # if not polyglot:
+            run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
+            # else:
+            #     run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
         except Exception as e:
             safe_log(f"Error while evaluating the self-improvement: {e}")
 

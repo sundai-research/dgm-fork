@@ -6,6 +6,8 @@ import re
 import anthropic
 import backoff
 import openai
+from groq import Groq
+import groq
 
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
@@ -81,6 +83,10 @@ def create_client(model: str):
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
         ), model
+    elif model.startswith("qwen/"):
+        print(f"Using Groq API with model {model}.")
+        client = Groq()
+        return client, model
     elif model.startswith("Qwen/"):
         print(f"Using Together OpenAI-compatible API with model {model}.")
         client = openai.OpenAI(
@@ -92,7 +98,11 @@ def create_client(model: str):
         raise ValueError(f"Model {model} not supported.")
 
 # Get N responses from a single message, used for ensembling.
-@backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APITimeoutError))
+@backoff.on_exception(backoff.expo, 
+                      (openai.RateLimitError, openai.APITimeoutError, 
+                       groq.RateLimitError, groq.APIConnectionError, groq.APIStatusError, groq.APITimeoutError),
+                      max_time=360,
+                      max_value=60)
 def get_batch_responses_from_llm(
         msg,
         client,
@@ -171,10 +181,34 @@ def get_batch_responses_from_llm(
 
     return content, new_msg_history
 
+import os
+import fcntl
+from datetime import datetime
+
+def debug_log(message: str):
+    """
+    Thread-safe debug log function that appends messages to 'debug.log' in the same directory.
+    Each log entry is separated by a line of dashes and timestamped.
+    Uses a file lock to synchronize writes across threads and processes.
+    """
+    log_file = os.path.join(os.path.dirname(__file__), "debug.log")
+    separator = "#" * 100
+    timestamp = datetime.now().isoformat()
+    entry = f"\n{separator}\n[{timestamp}]\n{message}\n{separator}\n"
+    # Acquire an exclusive lock on the file while writing
+    # with open(log_file, "a+", encoding="utf-8") as f:
+    #     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    #     f.write(entry)
+    #     f.flush()
+    #     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    print(entry)
+
+
+
 @backoff.on_exception(
     backoff.expo,
-    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError),
-    max_time=120,
+    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError, groq.RateLimitError, groq.APIConnectionError, groq.APIStatusError, groq.APITimeoutError),
+    max_time=240,
 )
 def get_response_from_llm(
         msg,
@@ -185,6 +219,8 @@ def get_response_from_llm(
         msg_history=None,
         temperature=0.7,
 ):
+    # debug_log(f"get_response_from_llm 211: model {model}")
+    # debug_log(f"get_response_from_llm 212: msg {msg}")
     if msg_history is None:
         msg_history = []
 
@@ -236,20 +272,39 @@ def get_response_from_llm(
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif model.startswith("o1-") or model.startswith("o3-") or model.startswith("Qwen/"):
-        new_msg_history = msg_history + [{"role": "user", "content": system_message + msg}]
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
             model=model,
             messages=[
-                # {"role": "user", "content": system_message},
+                {"role": "system", "content": system_message},
                 *new_msg_history,
             ],
             temperature=1,
-            # max_completion_tokens=MAX_OUTPUT_TOKENS,
+            # max_tokens=MAX_OUTPUT_TOKENS,
             n=1,
             # stop=None,
             seed=0,
         )
         content = response.choices[0].message.content
+        content = content.split('</think>\n\n')[-1] if content else content
+        # debug_log(f"get_response_from_llm: {content}")
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif model.startswith("qwen/"):
+        # Groq-hosted Qwen models
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=new_msg_history,
+            max_completion_tokens=10,
+        )
+        num_prompt_tokens = response.usage.prompt_tokens
+        response = client.chat.completions.create(
+            model=model,
+            messages=new_msg_history,
+            max_completion_tokens=min(128000-num_prompt_tokens, 16384),
+        )
+        content = response.choices[0].message.content
+        content = content.split('</think>\n\n')[-1] if content else content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif model in ["deepseek-chat", "deepseek-coder"]:
         new_msg_history = msg_history + [{"role": "user", "content": msg}]

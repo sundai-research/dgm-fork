@@ -136,6 +136,7 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
             # Solve context length
             if any_exceeding_context_length(output_dir, parent_commit, empty_ids + unresolved_ids) and \
                 random.random() < 0.25:
+            # if True:
                 entry = 'solve_contextlength'
                 selfimprove_entries.append((parent_commit, entry))
                 continue
@@ -220,7 +221,7 @@ def get_full_eval_threshold(output_dir, archive):
 
 def main():
     parser = argparse.ArgumentParser(description="Darwin Godel Machine!")
-    parser.add_argument("--max_generation", type=int, default=80, help="Maximum number of evolution iterations.")
+    parser.add_argument("--max_generation", type=int, default=160, help="Maximum number of evolution iterations.")
     parser.add_argument("--selfimprove_size", type=int, default=2, help="Number of self-improvements attempts per DGM generation.")
     parser.add_argument("--selfimprove_workers", type=int, default=2, help="Number of parallel workers for self-improvement attempts.")
     parser.add_argument(
@@ -249,6 +250,7 @@ def main():
         
     output_dir = os.path.join("./output_dgm", run_id)
     os.makedirs(output_dir, exist_ok=True)
+    args.polyglot = False
 
     # Initialize
     archive, start_gen_num = initialize_run(output_dir, prevrun_dir=args.continue_from, polyglot=args.polyglot)

@@ -5,13 +5,16 @@ import anthropic
 import backoff
 import openai
 import copy
+import groq
 
 from llm import create_client, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
 CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-OPENAI_MODEL = 'Qwen/Qwen3-235B-A22B-fp8-tput'
+# OPENAI_MODEL = 'Qwen/Qwen3-235B-A22B-fp8-tput'
+OPENAI_MODEL = 'qwen/qwen3-32b'
+
 
 def process_tool_call(tools_dict, tool_name, tool_input):
     try:
@@ -21,10 +24,16 @@ def process_tool_call(tools_dict, tool_name, tool_input):
             return f"Error: Tool '{tool_name}' not found"
     except Exception as e:
         return f"Error executing tool '{tool_name}': {str(e)}"
+    
+def get_num_prompt_tokens(**kwargs):
+    kwargs.pop('max_tokens', None)
+    client=kwargs.pop('client')
+    tr = client.chat.completions.create(**kwargs, max_tokens=1)
+    return tr.usage.prompt_tokens
 
 @backoff.on_exception(
     backoff.expo,
-    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError),
+    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError, groq.RateLimitError, groq.APIConnectionError, groq.APIStatusError, groq.APITimeoutError),
     max_time=600,
     max_value=60,
 )
@@ -42,14 +51,47 @@ def get_response_withtools(
                 tools=tools,
             )
         elif model.startswith('o3-') or model.startswith('Qwen/'):
-            response = client.responses.create(
+            num_prompt_tokens = get_num_prompt_tokens(
+                client=client,
                 model=model,
-                input=messages,
-                tool_choice=tool_choice,
+                messages=messages,
                 tools=tools,
-                parallel_tool_calls=False
+                tool_choice=tool_choice,
+                parallel_tool_calls=False,
+            )            
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                parallel_tool_calls=False,
+                max_tokens=40000-num_prompt_tokens,
             )
-            response = response
+            content = response.choices[0].message.content
+            response.choices[0].message.content = content.split('</think>\n\n')[-1] if content else content
+        elif model.startswith('qwen/'):
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                parallel_tool_calls=False,
+                stream=False,
+                max_completion_tokens=10,
+            )
+            num_prompt_tokens = response.usage.prompt_tokens
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                parallel_tool_calls=False,
+                stream=False,
+                max_completion_tokens=min(128000-num_prompt_tokens, 16384),
+            )
+            content = response.choices[0].message.content
+            response.choices[0].message.reasoning = None
+            response.choices[0].message.content = content.split('</think>\n\n')[-1] if content else content
         else:
             raise ValueError(f"Unsupported model: {model}")
         return response
@@ -78,18 +120,18 @@ def check_for_tool_use(response, model=''):
                 'tool_input': tool_use_block.input,
             }
 
-    elif model.startswith('o3-') or model.startswith('Qwen/'):
-        # OpenAI, check for tool_calls in response
-        for tool_call in response.output:
-            if tool_call.type == "function_call":
-                break
-
-        if tool_call:
-            return {
-                'tool_id': tool_call.call_id,
-                'tool_name': tool_call.name,
-                'tool_input': json.loads(tool_call.arguments),
-            }
+    elif model.startswith('o3-') or model.startswith('Qwen/') or model.startswith('qwen/'):
+        # Qwen/OpenAI-compatible (including Groq): check for tool_calls on the first message
+        if hasattr(response, 'choices') and response.choices:
+            msg = response.choices[0].message
+            tool_calls = getattr(msg, 'tool_calls', None)
+            if tool_calls:
+                tc = tool_calls[0]
+                return {
+                    'tool_id': tc.id,
+                    'tool_name': tc.function.name,
+                    'tool_input': json.loads(tc.function.arguments),
+                }
 
     else:
         # Any other LLM, response is str, check for <tool_use> tag in response
@@ -220,7 +262,12 @@ def convert_msg_history_openai(msg_history):
         if isinstance(msg, dict):
             role = msg.get('role', '')
             content = msg.get('content', '')
-
+            {
+            "tool_call_id": tool_call.id,
+            "role": "tool",
+            "name": function_name,
+            "content": function_response,
+            }
             if role == 'tool':
                 new_msg = {
                     "role": "user",
@@ -438,12 +485,7 @@ def chat_with_agent_openai(
     new_msg_history = [
         {
             "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": msg,
-                }
-            ],
+            "content": msg,
         }
     ]
     separator = '=' * 10
@@ -452,26 +494,49 @@ def chat_with_agent_openai(
         # Create client
         client, client_model = create_client(model)
 
+        # Start Generation Here
+        def _debug_location():
+            import inspect
+            # Get the caller's frame
+            frame = inspect.currentframe().f_back
+            info = inspect.getframeinfo(frame)
+            # Neon bright fluorescent red debug print
+            print(f"\033[1;91m[DEBUG] File: {info.filename}, Function: {info.function}, Line: {info.lineno}\033[0m")
+        # Invoke the debug helper
+        _debug_location()
+        # End Generation Her
+
         # Load all tools
         all_tools = load_all_tools(logging=logging)
+        _debug_location()
         tools_dict = {tool['info']['name']: tool for tool in all_tools}
+        _debug_location()
         tools = [convert_tool_info(tool['info'], model=client_model) for tool in all_tools]
+        _debug_location()
 
-        # Call API
-        response = get_response_withtools(
-            client=client,
-            model=client_model,
-            messages=msg_history + new_msg_history,
-            tool_choice="auto",
-            tools=tools,
-            logging=logging,
-        )
+        try:
+            # Call API
+            response = get_response_withtools(
+                client=client,
+                model=client_model,
+                messages=msg_history + new_msg_history,
+                tool_choice="auto",
+                tools=tools,
+                logging=logging,
+            )
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            raise
+        _debug_location()
         logging(f"\n{separator} Agent Response {separator}\n{response}")
 
         # Check for tool use
         tool_use = check_for_tool_use(response, model=client_model)
+        _debug_location()
         logging(tool_use)
         while tool_use:
+            _debug_location()
             # Process tool call
             tool_name = tool_use['tool_name']
             tool_input = tool_use['tool_input']
@@ -481,16 +546,19 @@ def chat_with_agent_openai(
             logging(f"Tool Input: {tool_input}")
             logging(f"Tool Result: {tool_result}")
 
-            # Get tool response
-            for tool_call in response.output:
-                if tool_call.type == "function_call":
-                    break
-            new_msg_history.append(tool_call)
+            # Append the assistant function_call message
+            msg1 = response.choices[0].message
+            new_msg_history.append(msg1)
+
+            # Append the tool result as a tool message
             new_msg_history.append({
-                "type": "function_call_output",
-                "call_id": tool_use['tool_id'],
-                "output": tool_result,
+                "tool_call_id": tool_use['tool_id'],
+                "role": "tool",
+                "name": tool_name,
+                "content": tool_result,
             })
+
+            # Call API again to get the next response
             response = get_response_withtools(
                 client=client,
                 model=client_model,
@@ -513,9 +581,89 @@ def chat_with_agent_openai(
 
     return new_msg_history
 
+def chat_with_agent_groq(
+    msg,
+    model='qwen/qwen3-32b',
+    msg_history=None,
+    logging=print,
+):
+    separator = '=' * 10
+    logging(f"\n{separator} User Instruction {separator}\n{msg}")
+    # Initialize conversation
+    new_msg_history = [{"role": "user", "content": msg}]
+    try:
+        if msg_history is None:
+            msg_history = []
+        # Load tools and prepare definitions
+        all_tools = load_all_tools(logging=logging)
+        tools_defs = []
+        tools_dict = {}
+        for tool in all_tools:
+            info = tool['info']
+            tools_defs.append({
+                "type": "function",
+                "function": {
+                    "name": info['name'],
+                    "description": info['description'],
+                    "parameters": info['input_schema'],
+                },
+                "strict": True,
+            })
+            tools_dict[info['name']] = tool
+
+        client, client_model = create_client(model)
+
+        # First API call with tool definitions
+        response = get_response_withtools(
+            client=client,
+            model=client_model,
+            messages=msg_history + new_msg_history,
+            tools=tools_defs,
+            tool_choice="auto",
+            logging=logging,
+        )
+        logging(f"\n{separator} Agent Response {separator}\n{response}")
+
+        # Loop over tool uses
+        new_msg_history.append(response.choices[0].message)
+        tool_use = check_for_tool_use(response, model=client_model)
+        while tool_use:
+            # Execute tool
+            result = process_tool_call(
+                tools_dict, tool_use['tool_name'], tool_use['tool_input']
+            )
+            logging(f"Tool Used: {tool_use['tool_name']}")
+            logging(f"Tool Input: {tool_use['tool_input']}")
+            logging(f"Tool Result: {result}")
+            # Append tool result
+            new_msg_history.append({
+                "role": "tool",
+                "name": tool_use['tool_name'],
+                "tool_call_id": tool_use['tool_id'],
+                "content": result,
+            })
+            # Next API call
+            response = get_response_withtools(
+                client=client,
+                model=client_model,
+                messages=msg_history + new_msg_history,
+                tools=tools_defs,
+                tool_choice="auto",
+                logging=logging,
+            )
+            new_msg_history.append(response.choices[0].message)
+            tool_use = check_for_tool_use(response, model=client_model)
+            logging(f"Tool Response: {response}")
+    except Exception:
+        import traceback
+        logging(f"Error in chat_with_agent_groq: {traceback.format_exc()}")
+        pass
+
+    return new_msg_history
+
 def chat_with_agent(
     msg,
-    model=CLAUDE_MODEL,
+    model="qwen/qwen3-32b",
     msg_history=None,
     logging=print,
     convert=False,  # Convert the message history to a generic format, so that msg_history can be used across models
@@ -532,6 +680,10 @@ def chat_with_agent(
             new_msg_history = conv_msg_history
         new_msg_history = msg_history + new_msg_history
 
+    elif model.startswith('qwen/'):
+        # Groq-hosted Qwen models
+        new_msg_history = chat_with_agent_groq(msg, model=model, msg_history=msg_history, logging=logging)
+        new_msg_history = msg_history + new_msg_history
     elif model.startswith('o3-') or model.startswith('Qwen/'):
         # OpenAI models
         new_msg_history = chat_with_agent_openai(msg, model=model, msg_history=msg_history, logging=logging)
@@ -551,5 +703,6 @@ def chat_with_agent(
 
 if __name__ == "__main__":
     # Test the tool calling functionality
-    msg = "hello!"
-    chat_with_agent(msg)
+    msg = "hello! please list the files in the current directory"
+    history = chat_with_agent(msg)
+    from IPython import embed; embed()

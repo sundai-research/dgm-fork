@@ -118,6 +118,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
             "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
             "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+            "TOGETHER_API_KEY": os.getenv('TOGETHER_API_KEY'),
+            "GROQ_API_KEY": os.getenv('GROQ_API_KEY'),
         }
         safe_log("Running the agent")
         cmd = [
