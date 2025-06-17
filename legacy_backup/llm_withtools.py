@@ -11,7 +11,7 @@ from llm import create_client, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
-CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
+CLAUDE_MODEL = 'claude-3-5-sonnet-20241022'
 # OPENAI_MODEL = 'Qwen/Qwen3-235B-A22B-fp8-tput'
 OPENAI_MODEL = 'qwen/qwen3-32b'
 

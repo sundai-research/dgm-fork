@@ -1,6 +1,6 @@
 import random
 from qwen_client import extract_json_between_markers, get_response_from_llm
-from llm_withtools import convert_msg_history
+from qwen_chat import convert_qwen_msg_history
 from utils.swe_log_parsers import MAP_REPO_TO_PARSER
 
 
@@ -23,8 +23,8 @@ def msg_history_to_report(instance_id, msg_history, model=None):
     """
     Get test report from the message history.
     """
-    # Convert the message history to a generic format
-    msg_history = convert_msg_history(msg_history, model=model)
+    # Convert the message history to a generic format using qwen conversion
+    msg_history = convert_qwen_msg_history(msg_history)
 
     # Get the test report from the message history
     for msg in reversed(msg_history):
@@ -55,7 +55,7 @@ def score_tie_breaker(problem_statement, code_diffs, test_reports, best_score_in
     best_score_indices = list(range(len(code_diffs))) if not best_score_indices else best_score_indices
     best_score_index = best_score_indices[0]
     try:
-        client = create_client('o1-2024-12-17')
+        # Use qwen/qwen3-32b instead of o1 model
         proposed_solutions = [f'# Proposed solution {i+1}\n\n<code_diff_{i+1}>\n{code_diffs[index]}\n</code_diff{i+1}>\n<test_report_{i+1}>\n{test_reports[index]}\n</test_report_{i+1}>' for i, index in enumerate(best_score_indices)]
         proposed_solutions = '\n\n'.join(proposed_solutions)
         prompt = f"""Given the following problem statement, proposed solutions, and test reports, provide a summary of the differences between the code diffs and an evaluation of the proposed solutions.
@@ -81,8 +81,6 @@ Your response will be automatically parsed, so ensure that the string response i
 """
         response, msg_history = get_response_from_llm(
             msg=prompt,
-            client=client[0],
-            model=client[1],
             system_message='You are an excellent software engineer who has been asked to evaluate the proposed solutions to a problem statement.',
             print_debug=True,
             msg_history=None,

@@ -10,42 +10,39 @@ from unittest.mock import patch, MagicMock
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llm import create_client, get_response_from_llm, extract_json_between_markers
+from qwen_client import get_response_from_llm, extract_json_between_markers
 from groq import Groq
 
 
-class TestGroqClientCreation:
-    """Test Groq client creation from llm.py"""
+class TestQwenClientBasics:
+    """Test qwen_client.py basic functionality"""
     
-    def test_create_client_qwen_model(self):
-        """Test that create_client correctly handles qwen/qwen3-32b model"""
-        model = "qwen/qwen3-32b"
+    @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
+    def test_qwen_client_basic_call(self):
+        """Test that qwen_client get_response_from_llm works"""
         
-        with patch.dict(os.environ, {'GROQ_API_KEY': 'test-key'}):
-            client, client_model = create_client(model)
-            
-        # Verify correct client type and model returned
-        assert isinstance(client, Groq), f"Expected Groq client, got {type(client)}"
-        assert client_model == model, f"Expected {model}, got {client_model}"
-    
-    def test_create_client_qwen32b_only(self):
-        """Test that create_client handles qwen/qwen3-32b model specifically"""
-        model = "qwen/qwen3-32b"
+        # Test basic call (no client/model parameters needed)
+        content, msg_history = get_response_from_llm(
+            msg="Say 'test successful' and nothing else",
+            system_message="You are a helpful assistant."
+        )
         
-        with patch.dict(os.environ, {'GROQ_API_KEY': 'test-key'}):
-            client, client_model = create_client(model)
-            
-        assert isinstance(client, Groq)
-        assert client_model == model
+        # Verify response structure
+        assert isinstance(content, str), f"Expected string content, got {type(content)}"
+        assert len(content) > 0, "Response content should not be empty"
+        assert isinstance(msg_history, list), f"Expected list msg_history, got {type(msg_history)}"
+        assert len(msg_history) == 2, f"Expected 2 messages in history, got {len(msg_history)}"
     
-    def test_create_client_missing_groq_key(self):
+    def test_qwen_client_missing_groq_key(self):
         """Test behavior when GROQ_API_KEY is missing"""
-        model = "qwen/qwen3-32b"
         
         # Remove GROQ_API_KEY if it exists - should raise error
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(Exception):  # GroqError when no API key
-                client, client_model = create_client(model)
+                get_response_from_llm(
+                    msg="test",
+                    system_message="test"
+                )
 
 
 class TestGroqLLMResponses:
@@ -63,8 +60,6 @@ class TestGroqLLMResponses:
     @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
     def test_get_response_from_llm_qwen_real(self):
         """Test real API call to Qwen model (requires API key)"""
-        model = "qwen/qwen3-32b"
-        client, client_model = create_client(model)
         
         # Simple test message
         msg = "Hello, please respond with just 'OK'"
@@ -73,8 +68,6 @@ class TestGroqLLMResponses:
         try:
             content, msg_history = get_response_from_llm(
                 msg=msg,
-                client=client,
-                model=client_model,
                 system_message=system_message,
                 print_debug=False,
                 msg_history=None,
@@ -102,11 +95,10 @@ class TestGroqLLMResponses:
     
     def test_get_response_from_llm_qwen_mocked(self, mock_groq_response):
         """Test Qwen response handling with mocked API"""
-        model = "qwen/qwen3-32b"
         
-        with patch('llm.create_client') as mock_create_client:
+        with patch('qwen_client.Groq') as mock_groq_class:
             mock_client = MagicMock()
-            mock_create_client.return_value = (mock_client, model)
+            mock_groq_class.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_groq_response
             
             msg = "Test message"
@@ -114,8 +106,6 @@ class TestGroqLLMResponses:
             
             content, msg_history = get_response_from_llm(
                 msg=msg,
-                client=mock_client,
-                model=model,
                 system_message=system_message,
                 print_debug=False,
                 msg_history=None
@@ -129,20 +119,17 @@ class TestGroqLLMResponses:
     
     def test_thinking_tag_removal(self, mock_groq_response):
         """Test that </think> tags are properly removed from Qwen responses"""
-        model = "qwen/qwen3-32b"
         
         # Mock response with thinking tags
         mock_groq_response.choices[0].message.content = "<think>Internal reasoning</think>\n\nActual response"
         
-        with patch('llm.create_client') as mock_create_client:
+        with patch('qwen_client.Groq') as mock_groq_class:
             mock_client = MagicMock()
-            mock_create_client.return_value = (mock_client, model)
+            mock_groq_class.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_groq_response
             
             content, msg_history = get_response_from_llm(
                 msg="Test",
-                client=mock_client,
-                model=model,
                 system_message="Test",
                 print_debug=False,
                 msg_history=None
@@ -206,27 +193,28 @@ More text after.
 class TestGroqSpecificBehavior:
     """Test Qwen/Groq specific behavior and edge cases"""
     
-    def test_qwen_token_limit_handling(self, mock_groq_response):
-        """Test that Qwen token limit logic works (lines 298-304 in llm.py)"""
-        model = "qwen/qwen3-32b"
+    def test_qwen_token_limit_handling(self):
+        """Test that Qwen token limit logic works (two-stage approach)"""
         
         # Mock the two-stage token checking approach
         first_response = MagicMock()
         first_response.usage.prompt_tokens = 50000  # Mock prompt token count
         
-        second_response = mock_groq_response
+        # Create second response mock
+        second_response = MagicMock()
+        second_response.choices = [MagicMock()]
+        second_response.choices[0].message.content = "Test response from Qwen model"
+        second_response.usage.prompt_tokens = 100
         
-        with patch('llm.create_client') as mock_create_client:
+        with patch('qwen_client.Groq') as mock_groq_class:
             mock_client = MagicMock()
-            mock_create_client.return_value = (mock_client, model)
+            mock_groq_class.return_value = mock_client
             
             # First call returns token count, second returns actual response
             mock_client.chat.completions.create.side_effect = [first_response, second_response]
             
             content, msg_history = get_response_from_llm(
                 msg="Long message",
-                client=mock_client,
-                model=model,
                 system_message="System",
                 print_debug=False,
                 msg_history=None

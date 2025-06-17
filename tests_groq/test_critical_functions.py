@@ -66,6 +66,67 @@ More text.
         # What external code expects: None when no JSON found
         assert result is None
     
+    def test_msg_history_to_report_basic(self):
+        """Test msg_history_to_report function (used by eval system)"""
+        from utils.eval_utils import msg_history_to_report
+        from qwen_chat import convert_qwen_msg_history
+        
+        # Create sample message history with tool result
+        sample_history = [
+            {"role": "user", "content": "Run tests"},
+            {"role": "tool", "content": "PASSED test_example::test_func", "tool_call_id": "123", "name": "bash"}
+        ]
+        
+        # Test that msg_history_to_report works
+        result = msg_history_to_report('dgm', sample_history)
+        
+        # What eval system expects: dict with test results
+        assert isinstance(result, dict)
+        # Should either be empty or contain test results
+    
+    @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
+    def test_msg_history_to_report_with_real_qwen_test_output(self):
+        """Test msg_history_to_report with actual qwen model output that produces non-empty report"""
+        from qwen_chat import chat_with_qwen
+        from utils.eval_utils import msg_history_to_report
+        
+        print("\n=== Testing msg_history_to_report with real qwen output ===")
+        
+        # Ask qwen to run tests that will generate parseable output
+        msg = "Please run the project tests using the bash tool: 'python -m pytest tests/ --tb=no -v'"
+        
+        def test_log(msg_str):
+            print(f"TEST_LOG: {msg_str}")
+        
+        # Get qwen message history with test output
+        qwen_history = chat_with_qwen(
+            msg=msg,
+            msg_history=[],
+            logging=test_log
+        )
+        
+        print(f"Qwen history length: {len(qwen_history)}")
+        
+        # Test msg_history_to_report with the qwen output
+        test_report = msg_history_to_report('dgm', qwen_history)
+        
+        print(f"Generated test report: {test_report}")
+        print(f"Report contains {len(test_report) if test_report else 0} test results")
+        
+        # Assertions
+        assert isinstance(test_report, dict), "Should return a dict"
+        assert len(test_report) > 0, "Should contain test results from qwen's test run"
+        
+        # Verify we have actual test results
+        test_names = list(test_report.keys())
+        print(f"Found tests: {test_names[:3]}...")  # Show first 3 test names
+        
+        # Should have some test results with PASSED/FAILED status
+        statuses = set(test_report.values())
+        assert 'PASSED' in statuses or 'FAILED' in statuses, "Should contain actual test statuses"
+        
+        print("✅ SUCCESS: msg_history_to_report works with real qwen output!")
+    
     @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
     def test_chat_with_agent_basic_usage(self):
         """Test chat_with_agent with qwen3-32b as coding_agent.py uses it"""
