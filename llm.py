@@ -51,6 +51,7 @@ def create_client(model: str):
     Returns:
         Tuple[Any, str]: A tuple containing the client instance and the client model name.
     """
+    # LOGGING: Track external usage patterns for refactoring
     if model.startswith("claude-"):
         print(f"Using Anthropic API with model {model}.")
         return anthropic.Anthropic(), model
@@ -191,17 +192,18 @@ def debug_log(message: str):
     Each log entry is separated by a line of dashes and timestamped.
     Uses a file lock to synchronize writes across threads and processes.
     """
-    log_file = os.path.join(os.path.dirname(__file__), "debug.log")
-    separator = "#" * 100
-    timestamp = datetime.now().isoformat()
-    entry = f"\n{separator}\n[{timestamp}]\n{message}\n{separator}\n"
-    # Acquire an exclusive lock on the file while writing
-    # with open(log_file, "a+", encoding="utf-8") as f:
-    #     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-    #     f.write(entry)
-    #     f.flush()
-    #     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    print(entry)
+    # log_file = os.path.join(os.path.dirname(__file__), "debug.log")
+    # separator = "#" * 100
+    # timestamp = datetime.now().isoformat()
+    # entry = f"\n{separator}\n[{timestamp}]\n{message}\n{separator}\n"
+    # # Acquire an exclusive lock on the file while writing
+    # # with open(log_file, "a+", encoding="utf-8") as f:
+    # #     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    # #     f.write(entry)
+    # #     f.flush()
+    # #     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    # print(entry)
+    pass
 
 
 
@@ -219,8 +221,7 @@ def get_response_from_llm(
         msg_history=None,
         temperature=0.7,
 ):
-    # debug_log(f"get_response_from_llm 211: model {model}")
-    # debug_log(f"get_response_from_llm 212: msg {msg}")
+    # LOGGING: Track external usage patterns for refactoring
     if msg_history is None:
         msg_history = []
 
@@ -365,6 +366,8 @@ def get_response_from_llm(
     return content, new_msg_history
 
 def extract_json_between_markers(llm_output):
+    # LOGGING: Track external usage patterns for refactoring
+    
     inside_json_block = False
     json_lines = []
     

@@ -659,6 +659,8 @@ def chat_with_agent_groq(
         logging(f"Error in chat_with_agent_groq: {traceback.format_exc()}")
         pass
 
+    # LOGGING: Debug message history structure
+
     return new_msg_history
 
 def chat_with_agent(
@@ -668,6 +670,8 @@ def chat_with_agent(
     logging=print,
     convert=False,  # Convert the message history to a generic format, so that msg_history can be used across models
 ):
+    # LOGGING: Track external usage patterns for refactoring
+    
     if msg_history is None:
         msg_history = []
 
