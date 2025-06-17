@@ -11,6 +11,9 @@ class TestStatus(Enum):
 def parse_log_pytest(log: str) -> dict[str, str]:
     """
     Parser for test logs generated with PyTest framework
+    
+    Handles both old format: "FAILED test_name" 
+    and new format: "test_name FAILED [percentage]"
 
     Args:
         log (str): log content
@@ -19,6 +22,11 @@ def parse_log_pytest(log: str) -> dict[str, str]:
     """
     test_status_map = {}
     for line in log.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Handle old format: STATUS test_name (original implementation)
         if any([line.startswith(x.value) for x in TestStatus]):
             # Additional parsing for FAILED status
             if line.startswith(TestStatus.FAILED.value):
@@ -27,6 +35,22 @@ def parse_log_pytest(log: str) -> dict[str, str]:
             if len(test_case) <= 1:
                 continue
             test_status_map[test_case[1]] = test_case[0]
+        
+        # Handle new format: test_name STATUS [percentage]
+        else:
+            for status in TestStatus:
+                if f" {status.value} " in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            status_idx = parts.index(status.value)
+                            if status_idx > 0:
+                                test_name = parts[0]  # First part is test name
+                                test_status_map[test_name] = status.value
+                                break
+                        except ValueError:
+                            continue
+                            
     return test_status_map
 
 
@@ -283,6 +307,6 @@ MAP_REPO_TO_PARSER = {
     "sqlfluff/sqlfluff": parse_log_sqlfluff,
     "sphinx-doc/sphinx": parse_log_sphinx,
     "sympy/sympy": parse_log_sympy,
-    # DGM repositories
+    # DGM repositories  
     "dgm": parse_log_pytest,
 }

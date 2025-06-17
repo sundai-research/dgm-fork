@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import threading
 
-from llm_withtools import CLAUDE_MODEL, OPENAI_MODEL, chat_with_agent
+from qwen_chat import chat_with_qwen
 from utils.git_utils import diff_versus_commit, reset_to_commit, apply_patch
 
 # reset_to_commit(git_dname, commit)
@@ -113,7 +113,7 @@ class AgenticSystem:
         self.language = language
 
         # Set the code model based on whether self-improvement is enabled
-        self.code_model = CLAUDE_MODEL if not self_improve else CLAUDE_MODEL
+        # No model selection needed - always use qwen/qwen3-32b
 
         # Initialize logger and store it in thread-local storage
         self.logger = setup_logger(chat_history_file)
@@ -150,7 +150,7 @@ class AgenticSystem:
 Your task is to make changes to the files in the {self.git_tempdir} directory to address the <problem_description>. I have already taken care of the required dependencies.
 """
         instruction = f"{task}\n\nPlease analyze the problem description carefully. Then make edits to the code files to complete the instruction."
-        init_edit = chat_with_agent(instruction, model=self.code_model, msg_history=[], logging=safe_log)
+        init_edit = chat_with_qwen(instruction, msg_history=[], logging=safe_log)
 
 def main():
     parser = argparse.ArgumentParser(description='Process repository with an agentic system.')

@@ -4,7 +4,7 @@ import json
 import os
 import docker
 
-from llm import create_client, get_response_from_llm, extract_json_between_markers
+from qwen_client import get_response_from_llm, extract_json_between_markers
 from prompts.self_improvement_prompt import get_diagnose_prompt_polyglot, get_diagnose_prompt_swe, get_problem_description_prompt
 from prompts.diagnose_improvement_prompt import get_diagnose_improvement_prompt
 from prompts.testrepo_prompt import get_test_description
@@ -25,11 +25,9 @@ from utils.docker_utils import (
 )
 
 dataset = None
-# diagnose_model = 'Qwen/Qwen3-235B-A22B-fp8-tput'
-diagnose_model = 'qwen/qwen3-32b'
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
-    client = create_client(diagnose_model)
+    # No client creation needed with new API
     if polyglot:
         diagnose_sys_message, diagnose_prompt = get_diagnose_prompt_polyglot(
             entry, commit, root_dir, out_dir, dataset,
@@ -42,11 +40,8 @@ def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attem
         )
     try:
         safe_log("#" * 100)
-        safe_log(f"diagnose_problem 43: diagnose_prompt {diagnose_prompt}")
         response, msg_history = get_response_from_llm(
             msg=diagnose_prompt,
-            client=client[0],
-            model=client[1],
             system_message=diagnose_sys_message,
             print_debug=False,
             msg_history=None,
@@ -89,7 +84,7 @@ def diagnose_improvement(
     Returns:
         dict: The improvement diagnosis.
     """
-    client = create_client(diagnose_model)
+    # No client creation needed with new API
     diagnose_sys_message, diagnose_prompt = get_diagnose_improvement_prompt(
         entry, parent_commit, root_dir, model_patch_file, out_dir, run_id, dataset,
         patch_files=patch_files,
@@ -98,8 +93,6 @@ def diagnose_improvement(
     try:
         response, msg_history = get_response_from_llm(
             msg=diagnose_prompt,
-            client=client[0],
-            model=client[1],
             system_message=diagnose_sys_message,
             print_debug=False,
             msg_history=None,

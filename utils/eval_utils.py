@@ -1,5 +1,5 @@
 import random
-from llm import create_client, extract_json_between_markers, get_response_from_llm
+from qwen_client import extract_json_between_markers, get_response_from_llm
 from llm_withtools import convert_msg_history
 from utils.swe_log_parsers import MAP_REPO_TO_PARSER
 

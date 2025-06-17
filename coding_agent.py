@@ -6,7 +6,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import threading
 
-from llm_withtools import CLAUDE_MODEL, OPENAI_MODEL, chat_with_agent
+from qwen_chat import chat_with_qwen
 from utils.eval_utils import get_report_score, msg_history_to_report, score_tie_breaker
 from utils.git_utils import diff_versus_commit, reset_to_commit, apply_patch
 
@@ -82,7 +82,7 @@ class AgenticSystem:
         self.test_description = test_description
         self.self_improve = self_improve
         self.instance_id = instance_id if not self_improve else 'dgm'
-        self.code_model = OPENAI_MODEL
+        # No model selection needed - always use qwen/qwen3-32b
 
         # Initialize logger and store it in thread-local storage
         self.logger = setup_logger(chat_history_file)
@@ -113,7 +113,7 @@ Your task is to identify regression tests in the {self.git_tempdir} directory th
 At the end, please provide a summary that includes where the regression tests are located, what they are testing, and how they can be executed.
 """
 
-        new_msg_history = chat_with_agent(instruction, model=self.code_model, msg_history=[], logging=safe_log)
+        new_msg_history = chat_with_qwen(instruction, msg_history=[], logging=safe_log)
         regression_tests_summary = new_msg_history[-1]
         try:
             regression_tests_summary = regression_tests_summary['content'][-1]['text']
@@ -146,8 +146,8 @@ At the end, please provide a summary that includes where the regression tests ar
 
 Your task is to run the regression tests in the {self.git_tempdir} directory to ensure that the changes made to the code address the <problem_description>.
 """
-        new_msg_history = chat_with_agent(instruction, model=self.code_model, msg_history=[], logging=safe_log)
-        test_report = msg_history_to_report(self.instance_id, new_msg_history, model=self.code_model)
+        new_msg_history = chat_with_qwen(instruction, msg_history=[], logging=safe_log)
+        test_report = msg_history_to_report(self.instance_id, new_msg_history)
         return test_report
 
     def forward(self):
@@ -166,7 +166,7 @@ Your task is to run the regression tests in the {self.git_tempdir} directory to 
 
 Your task is to make changes to the files in the {self.git_tempdir} directory to address the <problem_description>. I have already taken care of the required dependencies.
 """
-        new_msg_history = chat_with_agent(instruction, model=self.code_model, msg_history=[], logging=safe_log)
+        new_msg_history = chat_with_qwen(instruction, msg_history=[], logging=safe_log)
 
 def main():
     parser = argparse.ArgumentParser(description='Process repository with an agentic system.')

@@ -18,19 +18,25 @@ class TestQwenCriticalFunctions:
     """Test only the functions used externally with qwen3-32b model"""
     
     @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
-    def test_create_client_qwen_basic(self):
-        """Test create_client with qwen/qwen3-32b (used by self_improve_step.py)"""
-        from llm import create_client
+    def test_qwen_client_basic(self):
+        """Test qwen_client.py basic functionality (replaces create_client test)"""
+        from qwen_client import get_response_from_llm
         
-        client, model = create_client("qwen/qwen3-32b")
+        # Test that we can make a basic call without client/model parameters
+        content, msg_history = get_response_from_llm(
+            msg="Say 'OK' and nothing else",
+            system_message="You are a helpful assistant."
+        )
         
-        # What external code expects: a client and the same model string back
-        assert client is not None
-        assert model == "qwen/qwen3-32b"
+        # What external code expects: response content and message history
+        assert isinstance(content, str)
+        assert len(content) > 0
+        assert isinstance(msg_history, list)
+        assert len(msg_history) == 2
     
     def test_extract_json_between_markers_basic(self):
         """Test extract_json_between_markers (used by self_improve_step.py and eval_utils.py)"""
-        from llm import extract_json_between_markers
+        from qwen_client import extract_json_between_markers
         
         # Test with JSON in code block (primary use case)
         output_with_json = '''
@@ -52,7 +58,7 @@ More text.
     
     def test_extract_json_between_markers_failure(self):
         """Test extract_json_between_markers when no JSON found"""
-        from llm import extract_json_between_markers
+        from qwen_client import extract_json_between_markers
         
         output_no_json = "Just some text with no JSON."
         result = extract_json_between_markers(output_no_json)
@@ -169,14 +175,10 @@ class TestQwenRealWorldPatterns:
     
     @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
     def test_self_improve_step_pattern(self):
-        """Test the pattern used by self_improve_step.py with qwen3-32b"""
-        from llm import create_client, get_response_from_llm, extract_json_between_markers
+        """Test the pattern used by self_improve_step.py with qwen3-32b (updated for new API)"""
+        from qwen_client import get_response_from_llm, extract_json_between_markers
         
-        # Exactly how self_improve_step.py uses these functions
-        diagnose_model = 'qwen/qwen3-32b'
-        
-        # Pattern 1: Create client
-        client = create_client(diagnose_model)
+        # Updated pattern - no client creation needed
         
         # Better prompt to ensure JSON response with backticks
         json_prompt = """You must respond with valid JSON in a code block. Follow this exact format:
@@ -188,13 +190,10 @@ class TestQwenRealWorldPatterns:
 Nothing else, just that JSON in backticks."""
         
         try:
-            # Pattern 2: Get response 
+            # Simplified pattern: Get response (no client/model needed)
             response, msg_history = get_response_from_llm(
                 msg=json_prompt,
-                client=client[0],  # self_improve_step.py uses client[0]
-                model=client[1],   # self_improve_step.py uses client[1]
                 system_message="You are a helpful assistant that always responds with valid JSON in code blocks.",
-                print_debug=False,
                 msg_history=None,
             )
             
@@ -265,6 +264,227 @@ class TestQwenBehaviorExpectations:
             # Initial messages should be preserved
             assert result[0] == initial_history[0]
             assert result[1] == initial_history[1]
+
+
+class TestQwenConversionCompatibility:
+    """Test qwen message format compatibility with existing conversion system - ported from test_convert_claude.py"""
+    
+    @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
+    def test_qwen_tool_calling_and_conversion(self):
+        """Test qwen tool calling and message conversion - port of test_convert_claude.py"""
+        from qwen_chat import chat_with_qwen, convert_qwen_msg_history
+        from utils.eval_utils import msg_history_to_report
+        
+        print("\n=== Testing Qwen Tool Calling with chat_with_qwen ===")
+        
+        # Same test as Claude but with qwen API - the key message to test conversion
+        msg = "Please run the project tests using the bash tool: 'python -m pytest tests/ --tb=no'"
+        print(f"Calling Qwen with: {msg}")
+        
+        def detailed_log(msg_str):
+            print(f"QWEN_LOG: {msg_str}")
+        
+        # Get raw qwen message history from chat_with_qwen (NOT chat_with_agent)
+        raw_history = chat_with_qwen(
+            msg=msg,
+            msg_history=[],
+            logging=detailed_log
+        )
+        
+        print(f"\n=== Raw Qwen Message History ===")
+        print(f"Raw history has {len(raw_history)} messages")
+        print(f"Raw history type: {type(raw_history)}")
+        
+        for i, msg_item in enumerate(raw_history):
+            print(f"\nRaw {i}: type={type(msg_item)}")
+            
+            # Handle both dict and Pydantic object formats (like Claude test)
+            if hasattr(msg_item, 'role') and not isinstance(msg_item, dict):
+                # Pydantic object (ChatCompletionMessage from Groq)
+                role = msg_item.role
+                content = getattr(msg_item, 'content', None)
+                tool_calls = getattr(msg_item, 'tool_calls', None)
+                print(f"  Role: {role} (Pydantic)")
+                print(f"  Content type: {type(content)}")
+                print(f"  Content preview: {str(content)[:100]}..." if content else "  Content: None")
+                if tool_calls:
+                    print(f"  Tool calls: {len(tool_calls)}")
+                    for j, tc in enumerate(tool_calls):
+                        print(f"    Tool {j}: {tc.function.name}")
+            elif isinstance(msg_item, dict):
+                # Dict format (tool messages)
+                role = msg_item.get('role')
+                content = msg_item.get('content')
+                tool_call_id = msg_item.get('tool_call_id')
+                name = msg_item.get('name')
+                print(f"  Role: {role} (dict)")
+                print(f"  Content type: {type(content)}")
+                print(f"  Content preview: {str(content)[:100]}..." if content else "  Content: None")
+                if tool_call_id:
+                    print(f"  Tool call ID: {tool_call_id}")
+                if name:
+                    print(f"  Tool name: {name}")
+            else:
+                print(f"  Unknown format: {str(msg_item)[:100]}...")
+        
+        print(f"\n=== Testing convert_qwen_msg_history ===")
+        
+        # Test conversion with qwen-specific conversion function
+        converted_history = convert_qwen_msg_history(raw_history)
+        
+        print(f"Converted history has {len(converted_history)} messages")
+        print(f"Converted history type: {type(converted_history)}")
+        
+        for i, msg in enumerate(converted_history):
+            # Handle both dict and Pydantic object formats in converted history too
+            if hasattr(msg, 'role') and not isinstance(msg, dict):
+                # Still a Pydantic object after conversion
+                role = msg.role
+                content = getattr(msg, 'content', None)
+                print(f"\nConverted {i}: role={role}, content_type={type(content)} (Pydantic)")
+            elif isinstance(msg, dict):
+                # Dict format
+                role = msg.get('role')
+                content = msg.get('content')
+                print(f"\nConverted {i}: role={role}, content_type={type(content)} (dict)")
+            else:
+                role = 'unknown'
+                content = str(msg)
+                print(f"\nConverted {i}: role={role}, content_type={type(content)} (unknown)")
+            
+            # Look for tool results in converted format (like Claude test)
+            if isinstance(content, list) and content:
+                print(f"  Content blocks: {len(content)}")
+                for j, block in enumerate(content):
+                    if isinstance(block, dict):
+                        text = block.get('text', '')
+                        block_type = block.get('type', 'unknown')
+                        print(f"    Block {j}: type={block_type}")
+                        if 'Tool Result:' in text:
+                            print(f"    -> FOUND CONVERTED TOOL RESULT in block {j}!")
+                            print(f"       Preview: {text[:150]}...")
+                        elif '<tool_use>' in text:
+                            print(f"    -> FOUND CONVERTED TOOL USE in block {j}!")
+                            print(f"       Preview: {text[:150]}...")
+            elif isinstance(content, str):
+                print(f"  String content: {content[:100]}...")
+            else:
+                print(f"  Content: {content}")
+        
+        print(f"\n=== Testing msg_history_to_report ===")
+        
+        # Debug: manually check what the function should find (like Claude test)
+        print("DEBUG: Looking for Tool Result messages in converted history...")
+        for i, msg in enumerate(converted_history):
+            # Handle both dict and Pydantic object formats
+            if hasattr(msg, 'role') and not isinstance(msg, dict):
+                role = msg.role
+                content = getattr(msg, 'content', None)
+            elif isinstance(msg, dict):
+                role = msg.get('role')
+                content = msg.get('content')
+            else:
+                role = 'unknown'
+                content = str(msg)
+                
+            if role == 'user':
+                if isinstance(content, list) and content:
+                    text = content[0].get('text', '') if isinstance(content[0], dict) else str(content[0])
+                    if 'Tool Result:' in text:
+                        print(f"  Found Tool Result in message {i}")
+                        print(f"  Content preview: {text[:300]}...")
+                        
+                        # Try parsing this content directly
+                        from utils.eval_utils import parse_eval_output
+                        parsed = parse_eval_output('dgm', text)
+                        print(f"  Direct parse result: {parsed}")
+        
+        # Test the reporting function with converted history
+        # Use a dummy model that falls through convert_msg_history unchanged
+        test_report = msg_history_to_report('dgm', converted_history, model='dummy')
+        
+        print(f"Generated test report length: {len(test_report) if test_report else 0}")
+        if test_report:
+            print(f"Report preview: {test_report}...")
+        
+        # Assertions for test validity
+        assert isinstance(raw_history, list), "Raw history should be a list"
+        assert len(raw_history) > 0, "Should have some message history"
+        assert isinstance(converted_history, list), "Converted history should be a list"
+        
+        if test_report:
+            print("✅ SUCCESS: msg_history_to_report worked with Qwen conversion!")
+        else:
+            print("❌ WARNING: msg_history_to_report returned empty report - conversion issue")
+            
+        # Final assertion - test passes if we got a report
+        assert test_report, "Should generate a test report from qwen message history"
+    
+    @pytest.mark.skipif(not os.getenv('GROQ_API_KEY'), reason="GROQ_API_KEY not set")
+    def test_qwen_format_detailed_analysis(self):
+        """Detailed analysis of qwen format structures - port of test_qwen_format_analysis"""
+        print("\n=== Detailed Qwen Format Analysis ===")
+        
+        from qwen_chat import chat_with_qwen
+        
+        # Get qwen history for detailed analysis
+        qwen_history = chat_with_qwen(
+            'List files in current directory', 
+            msg_history=[], 
+            logging=lambda x: print(f"QWEN_DETAILED: {x}")
+        )
+        
+        print(f"\nQwen chat_with_qwen history has {len(qwen_history)} messages")
+        print(f"Qwen history type: {type(qwen_history)}")
+        
+        for i, msg in enumerate(qwen_history):
+            print(f"\nQwen {i}: type={type(msg)}")
+            print(f"  Object attributes: {dir(msg) if hasattr(msg, '__dict__') else 'No __dict__'}")
+            
+            if hasattr(msg, 'role') and not isinstance(msg, dict):
+                # Pydantic object (ChatCompletionMessage)
+                role = msg.role
+                content = getattr(msg, 'content', None)
+                tool_calls = getattr(msg, 'tool_calls', None)
+                print(f"  Role: {role} (Pydantic ChatCompletionMessage)")
+                print(f"  Content: {str(content)[:100]}..." if content else "  Content: None")
+                if tool_calls:
+                    print(f"  Tool calls: {len(tool_calls)}")
+                    for j, tc in enumerate(tool_calls):
+                        print(f"    {j}: name={tc.function.name}")
+                        print(f"        args={tc.function.arguments[:50]}...")
+                        print(f"        id={tc.id}")
+            elif isinstance(msg, dict):
+                # Dict format (tool result messages)
+                role = msg.get('role')
+                content = msg.get('content', '')
+                tool_call_id = msg.get('tool_call_id')
+                name = msg.get('name')
+                print(f"  Role: {role} (dict)")
+                print(f"  Content: {str(content)[:100]}...")
+                if tool_call_id:
+                    print(f"  Tool call ID: {tool_call_id}")
+                if name:
+                    print(f"  Tool name: {name}")
+                print(f"  All keys: {list(msg.keys())}")
+            else:
+                print(f"  Unknown format: {str(msg)[:100]}...")
+        
+        # Test basic assertions
+        assert isinstance(qwen_history, list), "Should return a list"
+        assert len(qwen_history) > 0, "Should have messages"
+        
+        # Look for evidence of tool usage
+        has_tool_messages = any(
+            (hasattr(msg, 'role') and not isinstance(msg, dict) and getattr(msg, 'tool_calls', None)) or
+            (isinstance(msg, dict) and msg.get('role') == 'tool')
+            for msg in qwen_history
+        )
+        
+        print(f"\nTool usage detected: {has_tool_messages}")
+        
+        # Assert that we found tool usage
+        assert has_tool_messages, "Should detect tool usage in qwen message history"
 
 
 class TestMinimalRequirements:
