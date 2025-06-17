@@ -71,8 +71,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         copy_to_container(container, 'utils/', '/dgm/utils/')
         copy_to_container(container, 'tests/', '/dgm/tests/')
         copy_to_container(container, 'prompts/', '/dgm/prompts/')
-        copy_to_container(container, 'llm.py', '/dgm/llm.py')
-        copy_to_container(container, 'llm_withtools.py', '/dgm/llm_withtools.py')
+        copy_to_container(container, 'qwen_chat.py', '/dgm/qwen_chat.py')
+        copy_to_container(container, 'qwen_client.py', '/dgm/qwen_client.py')
         chat_history_file_container = f'/dgm/{chat_history_file.name}'
 
         # See the checked repo
